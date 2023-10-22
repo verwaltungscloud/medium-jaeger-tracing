@@ -1,0 +1,84 @@
+version: "3.9"
+
+networks:
+    playground:
+        driver: overlay
+
+services:
+    swarm-hello-world:
+        image: lumaghg/medium-jaeger-tracing:latest
+        deploy:
+            labels:
+                - "traefik.enable=true"
+                - "traefik.http.routers.app.rule=Host(`app.localhost`)"
+                - "traefik.http.routers.app.entrypoints=web"
+                - "traefik.http.services.app.loadbalancer.server.port=4000"
+            replicas: 1
+        networks:
+            - playground
+
+    traefik:
+        image: "traefik:v2.9"
+        command:
+            - "--log.level=DEBUG"
+            - "--providers.docker=true"
+            - "--providers.docker.exposedbydefault=false"
+            - "--providers.docker.swarmMode=true"
+            - "--entrypoints.web.address=:80"
+            - "--accesslog=true"
+            - "--tracing.jaeger=true"
+            - "--tracing.jaeger.samplingServerURL=http://jaeger:5778/sampling"
+            - "--tracing.jaeger.localAgentHostPort=jaeger:6831"
+            - "--tracing.jaeger.propagation=jaeger"
+            - "--tracing.jaeger.disableAttemptReconnecting=false"
+            - "--api.insecure=true"
+            - "--providers.docker.network=pg_playground"
+        ports:
+            - 80:80
+        volumes:
+            - "//var/run/docker.sock:/var/run/docker.sock:ro"
+        deploy:
+            placement:
+                constraints:
+                    - node.role == manager
+        networks:
+            - playground
+
+    jaeger:
+        image: jaegertracing/all-in-one:1.46
+        environment:
+            - COLLECTOR_ZIPKIN_HTTP_PORT=:9411
+            - COLLECTOR_OTLP_ENABLED=true
+            - SPAN_STORAGE_TYPE=elasticsearch
+        command:
+            [
+                "--es.server-urls=http://elasticsearch:9200",
+                "--es.num-shards=1",
+                "--es.num-replicas=0",
+                "--log-level=error",
+                "--span-storage.type=elasticsearch",
+            ]
+        networks:
+            - playground
+        deploy:
+            labels:
+                - "traefik.enable=true"
+                - "traefik.http.routers.jaeger.rule=Host(`jaeger.localhost`)"
+                - "traefik.http.routers.jaeger.entrypoints=web"
+                - "traefik.http.services.jaeger.loadbalancer.server.port=16686"
+
+    elasticsearch:
+        image: docker.elastic.co/elasticsearch/elasticsearch:7.17.13
+        ports:
+            - 9200:9200
+        environment:
+            - cluster.name=jaeger-cluster
+            - discovery.type=single-node
+            - http.host=0.0.0.0
+            - transport.host=127.0.0.1
+            - ES_JAVA_OPTS=-Xms512m -Xmx512m
+            - xpack.security.enabled=false
+        volumes:
+            - ./esdata:/usr/share/elasticsearch/data
+        networks:
+            - playground
