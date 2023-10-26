@@ -22,17 +22,14 @@ app.get('/health', async (req, res) => {
 })
 
 app.get('/crash', (req, res) => {
-    tracer.startActiveSpan('simulate crash', span => {
-        try {
-            throw new Error("CRASH!");
-        } catch (e) {
-            span.setStatus({ code: api.SpanStatusCode.ERROR })
-            res.status(500).send("CRASH!");
-        }
-        finally {
-            span.end();
-        }
-    });
+    const span = api.trace.getActiveSpan();
+    try {
+        throw new Error("CRASH!");
+    } catch (e) {
+        span.setStatus({ code: api.SpanStatusCode.ERROR })
+        span.addEvent('CRASH!');
+        res.status(500).send("CRASH!");
+    }
 });
 
 console.log("starting up...")
